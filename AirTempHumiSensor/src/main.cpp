@@ -1,12 +1,14 @@
 #include <Arduino.h>
 #include <TempHumi.h>
 #include <Distance.h>
+#include <THWifi.h>
+#include <THServer.h>
 
 void setup()
 {
 	Serial.begin(9600);
-	Serial.println("Temperature and Humidity Sensor Test");
-	Serial.println("-----------------------------------");
+	initWiFi();
+	initServer();
 }
 
 void loop()
@@ -16,15 +18,13 @@ void loop()
 		float temperature = tempReading();
 		float humidity = humiReading();
 
-		Serial.print("Temperature: ");
-		Serial.print(temperature);
-		Serial.print(" °C, Humidity: ");
-		Serial.print(humidity);
-		Serial.println(" %");
+		updatePageContent(temperature, humidity);
 	}
 	else
 	{
 		Serial.println("Object out of range.");
+		sensorOffline();
 	}
+
 	delay(2000);
 }
