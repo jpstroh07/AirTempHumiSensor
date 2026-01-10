@@ -57,7 +57,7 @@ void loop()
 		if (digitalRead(IP_BUTTON_PIN) == LOW)
 		{
 			Serial.println("IP button pressed.");
-			showIPAddress(WiFi.localIP().toString().c_str());
+			showIPAddress(getIPAddress());
 
 			delay(5000);
 		}

@@ -17,7 +17,7 @@ void initDisplay()
     display.sendBuffer();
 }
 
-void showIPAddress(const char *ip)
+void showIPAddress(String ip)
 {
     display.clearBuffer();
     display.setFont(u8g2_font_6x13_tf);
@@ -25,7 +25,7 @@ void showIPAddress(const char *ip)
 
     display.println("IP Address:");
     display.setCursor(0, 25);
-    display.println(ip);
+    display.println(ip.c_str());
 
     display.sendBuffer();
 }
