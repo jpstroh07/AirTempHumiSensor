@@ -601,7 +601,7 @@ String pageContent()
         <div class="overlay-card" role="dialog" aria-modal="true" aria-label="Sensor error dialog">
             <div class="overlay-title">⚠️ Sensor error</div>
             <div class="overlay-subtitle">
-                The sensors reported an error. Please check wiring / power / connections.
+                The sensor reported an error. Check wiring / power / connections, then reboot the device.
             </div>
 
             <div class="overlay-grid">
