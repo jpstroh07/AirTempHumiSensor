@@ -50,6 +50,8 @@ void setup()
 		initServer();
 
 		delay(2000);
+
+		readAndUpdate();
 	}
 	catch (const char *msg)
 	{
@@ -57,6 +59,7 @@ void setup()
 		Serial.println(msg);
 
 		showError(msg);
+		sensorError();
 
 		for (;;)
 			;
