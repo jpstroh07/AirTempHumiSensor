@@ -1,7 +1,56 @@
 #include "THServer.h"
+#include <math.h>   // for isnan()
 
 AsyncWebServer server(80);
 AsyncEventSource events("/events");
+
+// -------------------------
+// Server-side state storage
+// -------------------------
+static float lastTemp = NAN;
+static float lastHum  = NAN;
+
+static unsigned long lastOkMs = 0;        // millis() of last successful sensor read
+static unsigned long errorSinceMs = 0;    // millis() when error first triggered (0 = not in error)
+static String currentStatus = "offline";  // "ok" | "offline" | "error"
+
+// Build one JSON snapshot of the current server state.
+// We include:
+// - status
+// - temperature/humidity (numbers only when ok; otherwise null)
+// - last_temperature/last_humidity (last known good values)
+// - last_ok_ms, error_since_ms
+// - server_ms (millis at time of building message; used by browser to estimate clock time)
+static String buildStateJson()
+{
+    const unsigned long nowMs = millis();
+
+    auto numOrNull = [](float v, int decimals) -> String {
+        if (isnan(v)) return "null";
+        return String(v, decimals);
+    };
+
+    String json = "{";
+
+    json += "\"status\":\"" + currentStatus + "\",";
+    json += "\"server_ms\":" + String(nowMs) + ",";
+    json += "\"last_ok_ms\":" + String(lastOkMs) + ",";
+    json += "\"error_since_ms\":" + String(errorSinceMs) + ",";
+
+    json += "\"last_temperature\":" + numOrNull(lastTemp, 2) + ",";
+    json += "\"last_humidity\":"    + numOrNull(lastHum,  2) + ",";
+
+    if (currentStatus == "ok") {
+        json += "\"temperature\":" + numOrNull(lastTemp, 2) + ",";
+        json += "\"humidity\":"    + numOrNull(lastHum,  2);
+    } else {
+        json += "\"temperature\":null,";
+        json += "\"humidity\":null";
+    }
+
+    json += "}";
+    return json;
+}
 
 String pageContent()
 {
@@ -25,6 +74,9 @@ String pageContent()
             --hum-color: #22c55e;
             --shadow-soft: 0 18px 45px rgba(15,23,42,0.65);
             --radius-lg: 18px;
+
+            --danger: #f87171;
+            --danger-soft: rgba(248,113,113,0.14);
         }
 
         * {
@@ -234,61 +286,236 @@ String pageContent()
 
         /* offline state for the chip (greyed out) */
         .chip.sensor-offline {
-            background: rgba(156,163,175,0.08); /* subtle grey background */
-            color: #e5e7eb; /* keep text readable */
+            background: rgba(156,163,175,0.08);
+            color: #e5e7eb;
             border-color: rgba(156,163,175,0.35);
         }
 
         .chip.sensor-offline #status-dot {
-            background: #9ca3af; /* grey dot */
+            background: #9ca3af;
             box-shadow: 0 0 0 3px rgba(156,163,175,0.25);
+        }
+
+        /* error state for the chip (red-ish) */
+        .chip.sensor-error {
+            background: var(--danger-soft);
+            color: #fecaca;
+            border-color: rgba(248,113,113,0.55);
+        }
+
+        .chip.sensor-error #status-dot {
+            background: var(--danger);
+            box-shadow: 0 0 0 3px rgba(248,113,113,0.20);
+        }
+
+        /* -------------------------
+           ERROR OVERLAY (modal-ish)
+           ------------------------- */
+        .overlay {
+            position: fixed;
+            inset: 0;
+            display: none; /* hidden by default */
+            align-items: center;
+            justify-content: center;
+            padding: 18px;
+            background: rgba(0,0,0,0.65);
+            backdrop-filter: blur(7px);
+            z-index: 9999;
+        }
+
+        .overlay.active {
+            display: flex;
+        }
+
+        .overlay-card {
+            width: min(620px, 100%);
+            border-radius: 22px;
+            padding: 18px 18px 16px;
+            background: rgba(2,6,23,0.96);
+            border: 1px solid rgba(248,113,113,0.50);
+            box-shadow: 0 30px 90px rgba(0,0,0,0.70);
+        }
+
+        .overlay-title {
+            font-size: 1.15rem;
+            font-weight: 700;
+            letter-spacing: 0.02em;
+        }
+
+        .overlay-subtitle {
+            margin-top: 8px;
+            font-size: 0.9rem;
+            color: var(--text-muted);
+            line-height: 1.35;
+        }
+
+        .overlay-grid {
+            margin-top: 14px;
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+        }
+
+        .overlay-box {
+            border: 1px solid rgba(148,163,184,0.30);
+            border-radius: 14px;
+            padding: 10px 10px 9px;
+            background: radial-gradient(circle at top left, rgba(148,163,184,0.16), transparent 60%);
+        }
+
+        .overlay-label {
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            margin-bottom: 6px;
+        }
+
+        .overlay-value {
+            font-variant-numeric: tabular-nums;
+            font-size: 1.1rem;
         }
     </style>
 
     <script>
-        function updateTimestamp() {
-            var el = document.getElementById('last-update');
+        function fmtTime(d) {
+            var hh = String(d.getHours()).padStart(2, '0');
+            var mm = String(d.getMinutes()).padStart(2, '0');
+            var ss = String(d.getSeconds()).padStart(2, '0');
+            return hh + ':' + mm + ':' + ss;
+        }
+
+        // Convert "server millis timestamps" into an estimated local time.
+        // We assume "now" and "server_ms" are roughly aligned at message arrival.
+        function estimateLocalTime(serverNowMs, eventMs) {
+            var delta = serverNowMs - eventMs;
+            return new Date(Date.now() - delta);
+        }
+
+        // Track the newest last_ok_ms we've displayed, so offline/error messages
+        // don’t change the "Last update" time unless a NEW ok reading happened.
+        var lastOkMsSeen = 0;
+
+        function setLastUpdateIfNew(serverMs, lastOkMs) {
+            if (typeof serverMs !== 'number') return;
+            if (typeof lastOkMs !== 'number') return;
+            if (lastOkMs <= 0) return;
+
+            if (lastOkMs > lastOkMsSeen) {
+                lastOkMsSeen = lastOkMs;
+                var dt = estimateLocalTime(serverMs, lastOkMs);
+                var el = document.getElementById('last-update');
+                if (el) el.innerText = fmtTime(dt);
+            }
+        }
+
+        function setValueIfNumber(id, value) {
+            var el = document.getElementById(id);
             if (!el) return;
-            var now = new Date();
-            var hh = String(now.getHours()).padStart(2, '0');
-            var mm = String(now.getMinutes()).padStart(2, '0');
-            var ss = String(now.getSeconds()).padStart(2, '0');
-            el.innerText = hh + ':' + mm + ':' + ss;
+            if (typeof value === 'number' && !isNaN(value)) {
+                el.innerText = value.toFixed(2);
+            }
+        }
+
+        function showErrorOverlay(lastT, lastH, lastOkAt, errAt) {
+            var overlay = document.getElementById('error-overlay');
+            if (!overlay) return;
+
+            var lt = document.getElementById('err-last-temp');
+            var lh = document.getElementById('err-last-hum');
+            var lok = document.getElementById('err-last-ok-at');
+            var es  = document.getElementById('err-since');
+
+            if (lt) lt.innerText = (typeof lastT === 'number' && !isNaN(lastT)) ? lastT.toFixed(2) : '--';
+            if (lh) lh.innerText = (typeof lastH === 'number' && !isNaN(lastH)) ? lastH.toFixed(2) : '--';
+            if (lok) lok.innerText = (lastOkAt instanceof Date) ? fmtTime(lastOkAt) : '--:--:--';
+            if (es)  es.innerText  = (errAt instanceof Date) ? fmtTime(errAt) : '--:--:--';
+
+            overlay.classList.add('active');
+        }
+
+        function hideErrorOverlay() {
+            var overlay = document.getElementById('error-overlay');
+            if (!overlay) return;
+            overlay.classList.remove('active');
         }
 
         var source = new EventSource('/events');
-        source.onmessage = function(event) {
+        source.onmessage = function(event) { // default SSE "message" event :contentReference[oaicite:2]{index=2}
             var data = JSON.parse(event.data);
 
             var tempEl = document.getElementById('temperature');
-            var humEl = document.getElementById('humidity');
+            var humEl  = document.getElementById('humidity');
             var chip = document.getElementById('status-chip');
             var chipLabel = document.getElementById('chip-label');
 
-            // Default: treat missing status as OK for backward compatibility
             var status = data.status || 'ok';
+
+            var serverMs = (typeof data.server_ms === 'number') ? data.server_ms : null;
+            var lastOkMs = (typeof data.last_ok_ms === 'number') ? data.last_ok_ms : 0;
+            var errMs    = (typeof data.error_since_ms === 'number') ? data.error_since_ms : 0;
+
+            var lastOkAt = (serverMs !== null && lastOkMs > 0) ? estimateLocalTime(serverMs, lastOkMs) : null;
+            var errAt    = (serverMs !== null && errMs > 0)    ? estimateLocalTime(serverMs, errMs)    : null;
+
+            // For offline/error we still want to be able to show last known values (esp. after reload)
+            var lastT = (typeof data.last_temperature === 'number') ? data.last_temperature : NaN;
+            var lastH = (typeof data.last_humidity === 'number') ? data.last_humidity : NaN;
+
+            // Update unit labels once
+            var tu = document.getElementById('temperature-unit');
+            var hu = document.getElementById('humidity-unit');
+            if (tu) tu.innerText = '°C';
+            if (hu) hu.innerText = '%';
 
             if (status === 'offline') {
                 if (chip) {
+                    chip.classList.remove('sensor-error');
                     chip.classList.remove('sensor-ok');
                     chip.classList.add('sensor-offline');
                 }
-                if (chipLabel) {
-                    chipLabel.innerText = 'Offline';
-                }
+                if (chipLabel) chipLabel.innerText = 'Offline';
 
+                // Show last known values (helpful after reload)
+                setValueIfNumber('temperature', lastT);
+                setValueIfNumber('humidity', lastH);
+
+                // Do NOT change "Last update" unless last_ok_ms is newer (it shouldn't be in offline)
+                setLastUpdateIfNew(serverMs, lastOkMs);
+
+                // Offline is not an error overlay
+                hideErrorOverlay();
                 return;
-            } else {
-                if (chip) {
-                    chip.classList.remove('sensor-offline');
-                    chip.classList.add('sensor-ok');
-                }
-                if (chipLabel) {
-                    chipLabel.innerText = 'Live data';
-                }
             }
 
-            // Only update values if they are real numbers
+            if (status === 'error') {
+                if (chip) {
+                    chip.classList.remove('sensor-offline');
+                    chip.classList.remove('sensor-ok');
+                    chip.classList.add('sensor-error');
+                }
+                if (chipLabel) chipLabel.innerText = 'Error';
+
+                // Keep showing last known values behind the overlay
+                setValueIfNumber('temperature', lastT);
+                setValueIfNumber('humidity', lastH);
+
+                // Do NOT change "Last update" unless last_ok_ms is newer (it won't be)
+                setLastUpdateIfNew(serverMs, lastOkMs);
+
+                showErrorOverlay(lastT, lastH, lastOkAt, errAt);
+                return;
+            }
+
+            // status === 'ok'
+            if (chip) {
+                chip.classList.remove('sensor-offline');
+                chip.classList.remove('sensor-error');
+                chip.classList.add('sensor-ok');
+            }
+            if (chipLabel) chipLabel.innerText = 'Live data';
+
+            // Update displayed live values
             if (typeof data.temperature === 'number' && !isNaN(data.temperature)) {
                 tempEl.innerText = data.temperature.toFixed(2);
             }
@@ -296,10 +523,17 @@ String pageContent()
                 humEl.innerText = data.humidity.toFixed(2);
             }
 
-            document.getElementById('temperature-unit').innerText = '°C';
-            document.getElementById('humidity-unit').innerText = '%';
+            // Update "Last update" only when there's a NEW ok reading
+            setLastUpdateIfNew(serverMs, lastOkMs);
 
-            updateTimestamp();
+            // Clear overlay on recovery
+            hideErrorOverlay();
+        };
+
+        // Optional: connection-level issues (ESP down / WiFi drop) can be handled here
+        // EventSource auto-reconnects in most browsers. :contentReference[oaicite:3]{index=3}
+        source.onerror = function(e) {
+            // You can set the chip to offline here if you want, but it's separate from "sensor offline".
         };
     </script>
 
@@ -319,7 +553,6 @@ String pageContent()
             </div>
 
             <div class="content-row">
-                <!-- Temperature card -->
                 <div class="metric-card">
                     <div class="metric-header">
                         <div class="metric-label">Temperature</div>
@@ -335,7 +568,6 @@ String pageContent()
                     <div class="metric-bar temp"></div>
                 </div>
 
-                <!-- Humidity card -->
                 <div class="metric-card">
                     <div class="metric-header">
                         <div class="metric-label">Humidity</div>
@@ -363,6 +595,42 @@ String pageContent()
             </div>
         </div>
     </div>
+
+    <!-- ERROR OVERLAY -->
+    <div class="overlay" id="error-overlay">
+        <div class="overlay-card" role="dialog" aria-modal="true" aria-label="Sensor error dialog">
+            <div class="overlay-title">⚠️ Sensor error</div>
+            <div class="overlay-subtitle">
+                The sensors reported an error. Please check wiring / power / connections.
+            </div>
+
+            <div class="overlay-grid">
+                <div class="overlay-box">
+                    <div class="overlay-label">Last valid temperature</div>
+                    <div class="overlay-value">
+                        <span id="err-last-temp">--</span> °C
+                    </div>
+                </div>
+
+                <div class="overlay-box">
+                    <div class="overlay-label">Last valid humidity</div>
+                    <div class="overlay-value">
+                        <span id="err-last-hum">--</span> %
+                    </div>
+                </div>
+
+                <div class="overlay-box">
+                    <div class="overlay-label">Last valid reading at</div>
+                    <div class="overlay-value" id="err-last-ok-at">--:--:--</div>
+                </div>
+
+                <div class="overlay-box">
+                    <div class="overlay-label">Error detected at</div>
+                    <div class="overlay-value" id="err-since">--:--:--</div>
+                </div>
+            </div>
+        </div>
+    </div>
 </body>
 </html>
 )rawliteral";
@@ -371,28 +639,49 @@ String pageContent()
 
 void initServer()
 {
+    // Send a full state snapshot immediately when a browser (re)connects to /events.
+    // This fixes: "reload page during error/offline shows normal view".
+    events.onConnect([](AsyncEventSourceClient *client) {
+        String json = buildStateJson();
+        // Using the same pattern as common ESPAsyncWebServer SSE examples: onConnect + client->send :contentReference[oaicite:4]{index=4}
+        client->send(json.c_str(), "message", millis(), 10000);
+    });
+
     server.addHandler(&events);
     server.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
               { request->send(200, "text/html", pageContent()); });
+
     server.begin();
 }
 
 void updatePageContent(float temperature, float humidity)
 {
-    String jsonData = "{";
-    jsonData += "\"status\":\"ok\",";
-    jsonData += "\"temperature\":" + String(temperature, 2) + ",";
-    jsonData += "\"humidity\":" + String(humidity, 2);
-    jsonData += "}";
+    // Successful read
+    lastTemp = temperature;
+    lastHum  = humidity;
+    lastOkMs = millis();
+    errorSinceMs = 0;
+    currentStatus = "ok";
+
+    String jsonData = buildStateJson();
     events.send(jsonData.c_str(), "message", millis());
 }
 
 void sensorOffline()
 {
-    String jsonData = "{";
-    jsonData += "\"status\":\"offline\",";
-    jsonData += "\"temperature\":null,";
-    jsonData += "\"humidity\":null";
-    jsonData += "}";
+    // Sensor not triggered: keep lastTemp/lastHum/lastOkMs untouched
+    currentStatus = "offline";
+
+    String jsonData = buildStateJson();
+    events.send(jsonData.c_str(), "message", millis());
+}
+
+void sensorError()
+{
+    // Sensor reading hindered: remember when error started (first time only)
+    currentStatus = "error";
+    if (errorSinceMs == 0) errorSinceMs = millis();
+
+    String jsonData = buildStateJson();
     events.send(jsonData.c_str(), "message", millis());
 }

@@ -22,14 +22,14 @@ void readAndUpdate()
 
 void offlineBehavior()
 {
-	Serial.println("Person not in range.");
-
 	sensorOffline();
 	clearDisplay();
 
 	offlineTick++;
+	Serial.print("Sensor offline tick: ");
+	Serial.println(offlineTick);
 
-	if (offlineTick >= 5)
+	if (offlineTick >= 150)
 	{
 		Serial.println("Offline tick limit reached, forcing update.");
 
@@ -40,14 +40,27 @@ void offlineBehavior()
 
 void setup()
 {
-	Serial.begin(9600);
-	pinMode(IP_BUTTON_PIN, INPUT_PULLUP);
+	try
+	{
+		Serial.begin(9600);
+		pinMode(IP_BUTTON_PIN, INPUT_PULLUP);
 
-	initWiFi();
-	initServer();
-	initDisplay();
+		initDisplay();
+		initWiFi();
+		initServer();
 
-	delay(2000);
+		delay(2000);
+	}
+	catch (const char *msg)
+	{
+		Serial.print("Exception caught during setup: ");
+		Serial.println(msg);
+
+		showError(msg);
+
+		for (;;)
+			;
+	}
 }
 
 void loop()
@@ -81,6 +94,7 @@ void loop()
 		Serial.println(msg);
 
 		showError(msg);
+		sensorError();
 
 		for (;;)
 			;

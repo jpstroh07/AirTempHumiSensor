@@ -9,5 +9,6 @@
 void initServer();
 void updatePageContent(float temperature, float humidity);
 void sensorOffline();
+void sensorError();
 
 #endif
