@@ -9,7 +9,7 @@ float tempReading()
     if (temperature < -40.0 || temperature > 125.0)
     {
         Serial.println("Temperature reading out of range!");
-        throw "Sensor is broken or not connected.";
+        throw "Sensor isn't reading";
     }
 
     return temperature;
@@ -22,7 +22,7 @@ float humiReading()
     if (humidity < 0.0 || humidity > 100.0)
     {
         Serial.println("Humidity reading out of range!");
-        throw "Sensor is broken or not connected.";
+        throw "Sensor isn't reading";
     }
 
     return humidity;

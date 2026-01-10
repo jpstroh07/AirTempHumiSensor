@@ -43,9 +43,9 @@ void setup()
 	Serial.begin(9600);
 	pinMode(IP_BUTTON_PIN, INPUT_PULLUP);
 
-	initDisplay();
 	initWiFi();
 	initServer();
+	initDisplay();
 
 	delay(2000);
 }

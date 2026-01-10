@@ -1,75 +1,65 @@
 #include "MyDisplay.h"
 
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+U8G2_SSD1306_128X32_UNIVISION_F_HW_I2C display(U8G2_R0, U8X8_PIN_NONE, SCL_PIN, SDA_PIN);
 
 void initDisplay()
 {
     Wire.begin(SDA_PIN, SCL_PIN);
 
-    if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C))
-    {
-        Serial.println(F("SSD1306 allocation failed"));
-        for (;;)
-            ;
-    }
+    display.begin();
 
-    display.clearDisplay();
-    display.setTextSize(1);
-    display.setTextColor(SSD1306_WHITE);
-    display.setCursor(0, 0);
+    display.clearBuffer();
+    display.setFont(u8g2_font_6x13_tf);
+    display.setCursor(0, 20);
 
-    display.println("Display Initialized");
+    display.println("Sensor initialized");
 
-    display.display();
+    display.sendBuffer();
 }
 
 void showIPAddress(const char *ip)
 {
-    display.clearDisplay();
-    display.setTextSize(1);
-    display.setTextColor(SSD1306_WHITE);
-    display.setCursor(0, 0);
+    display.clearBuffer();
+    display.setFont(u8g2_font_6x13_tf);
+    display.setCursor(0, 10);
 
     display.println("IP Address:");
-    display.setCursor(0, 16);
+    display.setCursor(0, 25);
     display.println(ip);
 
-    display.display();
+    display.sendBuffer();
 }
 
 void showReadings(float temperature, float humidity)
 {
-    display.clearDisplay();
-    display.setTextSize(1);
-    display.setTextColor(SSD1306_WHITE);
-    display.setCursor(0, 0);
+    display.clearBuffer();
+    display.setFont(u8g2_font_8x13_tf);
+    display.setCursor(0, 20);
 
-    display.print("Temp: ");
     display.print(temperature);
-    display.println(" C");
-    display.print("Humi: ");
+    display.print("C | ");
     display.print(humidity);
-    display.println(" %");
+    display.print("%");
 
-    display.display();
+    display.sendBuffer();
 }
 
 void clearDisplay()
 {
-    display.clearDisplay();
-    display.display();
+    display.clearBuffer();
+    display.sendBuffer();
 }
 
 void showError(const char *message)
 {
 
-    display.clearDisplay();
-    display.setTextSize(1);
-    display.setTextColor(SSD1306_WHITE);
-    display.setCursor(0, 0);
+    display.clearBuffer();
+    display.setFont(u8g2_font_6x13_tf);
+    display.setCursor(0, 10);
 
     display.println("Error:");
+    display.setCursor(0, 25);
     display.println(message);
     
-    display.display();
+    display.sendBuffer();
 }
