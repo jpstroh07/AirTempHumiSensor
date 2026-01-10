@@ -7,7 +7,7 @@
 #define US_TRIGGER_PIN 32
 #define US_ECHO_PIN 33
 
-#define US_MAX_DISTANCE_CM 15
+#define US_MAX_DISTANCE_CM 50
 
 boolean isInRange(int rangeCm = US_MAX_DISTANCE_CM);
 
