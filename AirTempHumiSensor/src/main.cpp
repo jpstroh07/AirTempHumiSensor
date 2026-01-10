@@ -5,6 +5,8 @@
 #include <THServer.h>
 #include <MyDisplay.h>
 
+#define IP_BUTTON_PIN 0
+
 int offlineTick = 0;
 
 void readAndUpdate()
@@ -20,7 +22,7 @@ void readAndUpdate()
 
 void offlineBehavior()
 {
-	Serial.println("Object out of range.");
+	Serial.println("Person not in range.");
 
 	sensorOffline();
 	clearDisplay();
@@ -39,6 +41,7 @@ void offlineBehavior()
 void setup()
 {
 	Serial.begin(9600);
+	pinMode(IP_BUTTON_PIN, INPUT_PULLUP);
 
 	initDisplay();
 	initWiFi();
@@ -49,14 +52,37 @@ void setup()
 
 void loop()
 {
-	if (isInRange())
+	try
 	{
-		readAndUpdate();
-	}
-	else
-	{
-		offlineBehavior();
-	}
+		if (digitalRead(IP_BUTTON_PIN) == LOW)
+		{
+			Serial.println("IP button pressed.");
+			showIPAddress(WiFi.localIP().toString().c_str());
 
-	delay(2000);
+			delay(5000);
+		}
+		else
+		{
+			if (isInRange())
+			{
+				readAndUpdate();
+			}
+			else
+			{
+				offlineBehavior();
+			}
+
+			delay(2000);
+		}
+	}
+	catch (const char *msg)
+	{
+		Serial.print("Exception caught: ");
+		Serial.println(msg);
+
+		showError(msg);
+
+		for (;;)
+			;
+	}
 }

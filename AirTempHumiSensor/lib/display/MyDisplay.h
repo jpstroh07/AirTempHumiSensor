@@ -17,6 +17,6 @@ void initDisplay();
 void showIPAddress(const char* ip);
 void showReadings(float temperature, float humidity);
 void clearDisplay();
-void showError();
+void showError(const char* message);
 
 #endif

@@ -2,60 +2,74 @@
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
-void initDisplay() {
+void initDisplay()
+{
     Wire.begin(SDA_PIN, SCL_PIN);
 
-    if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C))
+    {
         Serial.println(F("SSD1306 allocation failed"));
-        for(;;);
+        for (;;)
+            ;
     }
 
     display.clearDisplay();
-
     display.setTextSize(1);
     display.setTextColor(SSD1306_WHITE);
-    display.setCursor(0,0);
+    display.setCursor(0, 0);
+
     display.println("Display Initialized");
 
     display.display();
 }
 
-void showIPAddress(const char* ip) {
+void showIPAddress(const char *ip)
+{
     display.clearDisplay();
     display.setTextSize(1);
     display.setTextColor(SSD1306_WHITE);
-    display.setCursor(0,0);
+    display.setCursor(0, 0);
+
     display.println("IP Address:");
-    display.setTextSize(2);
-    display.setCursor(0,16);
+    display.setCursor(0, 16);
     display.println(ip);
+
     display.display();
 }
 
-void showReadings(float temperature, float humidity) {
+void showReadings(float temperature, float humidity)
+{
     display.clearDisplay();
     display.setTextSize(1);
     display.setTextColor(SSD1306_WHITE);
-    display.setCursor(0,0);
+    display.setCursor(0, 0);
+
     display.print("Temp: ");
     display.print(temperature);
     display.println(" C");
     display.print("Humi: ");
     display.print(humidity);
     display.println(" %");
+
     display.display();
 }
 
-void clearDisplay() {
+void clearDisplay()
+{
     display.clearDisplay();
     display.display();
 }
 
-void showError() {
+void showError(const char *message)
+{
+
     display.clearDisplay();
     display.setTextSize(1);
     display.setTextColor(SSD1306_WHITE);
-    display.setCursor(0,0);
-    display.println("Error!");
+    display.setCursor(0, 0);
+
+    display.println("Error:");
+    display.println(message);
+    
     display.display();
 }
